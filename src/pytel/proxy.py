@@ -1,5 +1,6 @@
 class LazyLoadProxy(object):
     """
+    https://github.com/ActiveState/code/blob/master/recipes/Python/496741_Object_Proxying/recipe-496741.py
    Modified from http://code.activestate.com/recipes/496741-object-proxying/
     """
     __slots__ = ["_obj_fn", "__weakref__", "__proxy_storage"]
@@ -90,4 +91,3 @@ class LazyLoadProxy(object):
         ins = object.__new__(theclass)
         theclass.__init__(ins, obj, *args, **kwargs)
         return ins
-
