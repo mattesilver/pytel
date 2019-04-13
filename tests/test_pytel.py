@@ -23,7 +23,7 @@ class test_Pytel(TestCase):
         self.assertIsInstance(context.b, B)
         self.assertIs(context.a.b, context.b)
 
-    def test_lazy_dependency_creation_and_resulotion(self):
+    def test_lazy_dependency_creation_and_resolution(self):
         class A:
             def __init__(self, context: Pytel):
                 self.b = context.b
@@ -194,3 +194,21 @@ class test_Pytel(TestCase):
             context.a
 
         self.assertRaises(ValueError, get_a)
+
+    def test_method_as_func(self):
+        class A:
+            @classmethod
+            def factory(cls, _):
+                return cls()
+
+        ctx = Pytel()
+        ctx.a = func(A.factory)
+        self.assertIsInstance(ctx.a, A)
+
+    def test_lambda_func(self):
+        class A:
+            pass
+
+        ctx = Pytel()
+        ctx.a = func(lambda ctx: A())
+        self.assertIsInstance(ctx.a, A)
