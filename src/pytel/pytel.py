@@ -1,11 +1,10 @@
-import abc
+import inspect
 import typing
 
 from .proxy import LazyLoadProxy
 
 
-class ObjectResolver(abc.ABC):
-    @abc.abstractmethod
+class ObjectResolver:
     def resolve(self, context):
         pass
 
@@ -94,12 +93,25 @@ class Pytel:
     def __setattr__(self, name, value):
         self._objects[name] = value
 
-    def __getattr__(self, name):
-        try:
-            obj = self._objects[name]
-        except KeyError:
+    def __getattribute__(self, name: str):
+        if name in ['_objects', '_stack', '_resolve'] or name.startswith('__'):
+            return object.__getattribute__(self, name)
+
+        _objects = self._objects
+        if name in _objects:
+            return self._resolve(name, _objects[name])
+
+        if name in dir(self):
+            value = object.__getattribute__(self, name)
+            if inspect.ismethod(value):
+                _objects[name] = value()
+            else:
+                _objects[name] = self._resolve(name, value)
+            return _objects[name]
+        else:
             raise AttributeError(name)
 
+    def _resolve(self, name, obj):
         if not isinstance(obj, ObjectResolver):
             return obj
         else:
@@ -132,6 +144,7 @@ class FunctionWrapper(ObjectResolver):
 
     >>> word = context.a
     """
+
     def __init__(self, fn: typing.Callable[[Pytel], object]):
         self._fn = fn
 

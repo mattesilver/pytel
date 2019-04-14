@@ -212,3 +212,30 @@ class test_Pytel(TestCase):
         ctx = Pytel()
         ctx.a = func(lambda ctx: A())
         self.assertIsInstance(ctx.a, A)
+
+    def test_subclassing_basic(self):
+        class A:
+            pass
+
+        class Context(Pytel):
+            def a(self):
+                return A()
+
+        ctx = Context()
+        self.assertIsInstance(ctx.a, A)
+
+    def test_subclassing_with_dep(self):
+        class A:
+            pass
+
+        class B:
+            def __init__(self, a):
+                self.a = a
+
+        class Context(Pytel):
+            def a(self):
+                return A()
+
+        ctx = Context()
+        ctx.b = func(lambda ctx: B(ctx.a))
+        self.assertIsInstance(ctx.b.a, A)
