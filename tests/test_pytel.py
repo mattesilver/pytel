@@ -1,9 +1,18 @@
+import logging
+import sys
 from unittest import TestCase
 
 from pytel import __version__, Pytel, lazy, func
+from pytel.pytel import FunctionWrapper
+
+log = logging.getLogger(__name__)
 
 
 class test_Pytel(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+
     def test_version(self):
         assert __version__ == '0.1.0'
 
@@ -222,6 +231,7 @@ class test_Pytel(TestCase):
                 return A()
 
         ctx = Context()
+        self.assertIsInstance(ctx._objects['a'], FunctionWrapper)
         self.assertIsInstance(ctx.a, A)
 
     def test_subclassing_with_dep(self):
@@ -239,3 +249,94 @@ class test_Pytel(TestCase):
         ctx = Context()
         ctx.b = func(lambda ctx: B(ctx.a))
         self.assertIsInstance(ctx.b.a, A)
+
+    def test_subclass_with_inst_attr(self):
+        t = test_Pytel.T()
+
+        class I(Pytel):
+            def __init__(self):
+                super().__init__()
+                self.t = t
+
+        ctx = I()
+        self.assertEqual(t, ctx._objects['t'])
+
+    def test_subclass_with_cls_attr(self):
+        t = test_Pytel.T()
+
+        class J(Pytel):
+            a = t
+
+        ctx = J()
+
+        self.assertEqual(t, ctx.a)
+
+    def test_init_from_dict(self):
+        class A:
+            pass
+
+        a = A()
+        ctx = Pytel({'a': a})
+        self.assertEqual(a, ctx._objects['a'])
+
+    class T:
+        def __init__(self, *args):
+            pass
+
+    def test_len(self):
+        ctx = Pytel({'a': self.T()})
+        self.assertEqual(1, len(ctx))
+
+    def test_get_item(self):
+        ctx = Pytel()
+        t = self.T()
+        ctx.t = t
+        self.assertEqual(t, ctx['t'])
+
+    def test_set_item(self):
+        ctx = Pytel()
+        t = self.T()
+        ctx['t'] = t
+        self.assertEqual(t, ctx._objects['t'])
+
+    def test_del_item(self):
+        ctx = Pytel()
+        t = self.T()
+        ctx.t = t
+        del ctx['t']
+        self.assertNotIn('t', ctx._objects)
+
+    def test_del(self):
+        ctx = Pytel()
+        t = self.T()
+        ctx.t = t
+        del ctx.t
+        self.assertNotIn('t', ctx._objects)
+
+    def test_contains(self):
+        ctx = Pytel()
+        t = self.T()
+        ctx.t = t
+        self.assertIn('t', ctx)
+
+    def test_keys(self):
+        ctx = Pytel()
+        ctx.t = self.T()
+
+        self.assertIn('t', ctx.keys())
+
+    def test_keys_subclass(self):
+        class Context(Pytel):
+            def t(self):
+                return test_Pytel.T()
+
+        ctx = Context()
+
+        self.assertIn('t', ctx.keys())
+
+    def test_func_none(self):
+        ctx = Pytel()
+        ctx.a = func(lambda ctx: None)
+
+        with self.assertRaises(ValueError):
+            a = ctx.a
