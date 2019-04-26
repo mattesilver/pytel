@@ -1,11 +1,12 @@
-import abc
+import logging
 import typing
 
 from .proxy import LazyLoadProxy
 
+log = logging.getLogger(__name__)
 
-class ObjectResolver(abc.ABC):
-    @abc.abstractmethod
+
+class ObjectResolver:
     def resolve(self, context):
         pass
 
@@ -87,19 +88,57 @@ class Pytel:
 
     """
 
-    def __init__(self):
-        object.__setattr__(self, '_objects', {})
+    def __init__(self, init: dict = None):
+        objects = {}
+        object.__setattr__(self, '_objects', objects)
         object.__setattr__(self, '_stack', [])
 
+        if init:
+            for k, v in init.items():
+                self._set(k, v)
+
+        # init subclass
+        for t in [type(self)] + list(type(self).__bases__):
+            if t is Pytel:
+                break
+            for name, value in t.__dict__.items():
+                if not _is_dunder(name):
+                    if callable(value) and not isinstance(value, type):
+                        self._set(name, FunctionWrapper(value))
+                    else:
+                        self._set(name, value)
+
     def __setattr__(self, name, value):
+        self._set(name, value)
+
+    def __delattr__(self, item):
+        if item not in self._objects:
+            raise AttributeError(item)
+        else:
+            del self._objects[item]
+
+    def __getattribute__(self, name: str):
+        # __getattribute__ is required instead of __getattr__ to kidnap accessing the subclasses' methods
+        if _is_special_name(name):
+            return object.__getattribute__(self, name)
+
+        try:
+            return self._get(name)
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def _get(self, name):
+        _objects = self._objects
+        if name in _objects:
+            return self._resolve(name, _objects[name])
+        else:
+            raise KeyError(name)
+
+    def _set(self, name, value):
+        log.debug('Registering %s := %s', name, value)
         self._objects[name] = value
 
-    def __getattr__(self, name):
-        try:
-            obj = self._objects[name]
-        except KeyError:
-            raise AttributeError(name)
-
+    def _resolve(self, name, obj):
         if not isinstance(obj, ObjectResolver):
             return obj
         else:
@@ -113,10 +152,36 @@ class Pytel:
                 inst = obj.resolve(self)
                 if inst is None:
                     raise ValueError('None', name)
-                self._objects[name] = inst
+                self._set(name, inst)
                 return inst
             finally:
                 self._stack.pop()
+
+    def __len__(self):
+        return len(self._objects)
+
+    def __getitem__(self, item):
+        return self._get(item)
+
+    def __setitem__(self, key, value):
+        self._set(key, value)
+
+    def __delitem__(self, key):
+        del self._objects[key]
+
+    def __contains__(self, item):
+        return item in self._objects
+
+    def keys(self):
+        return self._objects.keys()
+
+
+def _is_special_name(name):
+    return _is_dunder(name) or name in ['_objects', '_stack', '_get', '_set', '_resolve', 'keys']
+
+
+def _is_dunder(name):
+    return name.startswith('__') and name.endswith('__')
 
 
 class FunctionWrapper(ObjectResolver):
@@ -132,8 +197,12 @@ class FunctionWrapper(ObjectResolver):
 
     >>> word = context.a
     """
+
     def __init__(self, fn: typing.Callable[[Pytel], object]):
         self._fn = fn
 
     def resolve(self, context):
-        return self._fn(context)
+        result = self._fn(context)
+        if result is None:
+            raise ValueError
+        return result
