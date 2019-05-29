@@ -10,6 +10,10 @@ class A:
     pass
 
 
+class A1:
+    pass
+
+
 class B:
     def __init__(self, a: A):
         self.a = a
@@ -157,9 +161,6 @@ class test_Pytel(TestCase):
         self.assertEqual(a, ctx['a'])
 
     def test_find_one_by_type(self):
-        class A1:
-            pass
-
         ctx = Pytel()
         ctx.a = A()
         ctx.b = A1()
@@ -219,6 +220,27 @@ class test_Pytel(TestCase):
         self.assertEqual({ctx.a, ctx.b, ctx.c}, {*ctx.find_all_by_type(object)})
         self.assertEqual([], ctx.find_all_by_type(str))
 
+    def test_find_all_by_type_resolver_with_ctor(self):
+        ctx = Pytel({'a': AutoResolver(A)})
+        by_type = ctx.find_all_by_type(A)
+        self.assertEqual(1, len(list(by_type)))
+        self.assertIsInstance(by_type[0], A)
+
+    def test_find_all_by_type_resolver_with_return_hint_type(self):
+        a = A()
+
+        class Factory1:
+            def get(self) -> A:
+                return a
+
+        a1 = A1()
+
+        class Factory2:
+            def get(self) -> A1:
+                return a1
+
+        self.assertEqual([a], Pytel({'a': auto(Factory1().get), 'b': auto(Factory2().get)}).find_all_by_type(A))
+
     def test_len(self):
         # given
         ctx = Pytel()
@@ -253,8 +275,7 @@ class test_Pytel(TestCase):
 
     def test_delitem(self):
         # given
-        ctx = Pytel()
-        ctx.a = object()
+        ctx = Pytel({'a': object()})
 
         # when
         del ctx['a']
@@ -262,11 +283,24 @@ class test_Pytel(TestCase):
         # then
         self.assertNotIn('a', ctx._objects)
 
+    def test_delitem_missing(self):
+        # given
+        ctx = Pytel()
+
+        # when
+        with self.assertRaises(KeyError):
+            del ctx['a']
+
     def test_delattr(self):
         ctx = Pytel()
         ctx.a = object()
         del ctx.a
         self.assertNotIn('a', ctx._objects)
+
+    def test_delattr_missing(self):
+        ctx = Pytel()
+        with self.assertRaises(AttributeError):
+            del ctx.a
 
     def test_resolution_of_object_resolver(self):
         # given
@@ -357,6 +391,14 @@ class test_Pytel(TestCase):
 
         self.assertRaises(ValueError, TestContext)
 
+    def test_object_resolver_returns_none_error(self):
+        class Factory(ObjectResolver):
+            def resolve(self, ctx):
+                return None
+
+        with self.assertRaises(ValueError):
+            Pytel({'a': Factory()}).a
+
 
 class AutoResolverTest(TestCase):
     def test_with_none_as_callable(self):
@@ -427,6 +469,17 @@ class AutoResolverTest(TestCase):
         self.assertIsInstance(b, B)
         self.assertIs(a, b.a)
 
+    def test_function_with_typed_depedency(self):
+        a = A()
+
+        def factory(a):
+            return B(a)
+
+        ctx = Pytel({'a': a})
+        b = AutoResolver(factory).resolve(ctx)
+        self.assertIsInstance(b, B)
+        self.assertIs(a, b.a)
+
     def test_ctor_with_named_dependency(self):
         a = A()
         ctx = Pytel({'a': a})
@@ -449,10 +502,20 @@ class AutoResolverTest(TestCase):
         def factory(a: A):
             return B(a)
 
-        b = AutoResolver(B, ResolveBy.by_type).resolve(ctx)
+        b = AutoResolver(factory, ResolveBy.by_type).resolve(ctx)
 
         self.assertIsInstance(b, B)
         self.assertIs(a, b.a)
+
+    def test_function_with_dependency_resolved_by_type_missing_hint(self):
+        a = A()
+        ctx = Pytel({'b': a})
+
+        def factory(a):
+            return B(a)
+
+        with self.assertRaises(ValueError):
+            AutoResolver(factory, ResolveBy.by_type).resolve(ctx)
 
     def test_function_with_dependency_resolved_by_name_and_type(self):
         a = A()
@@ -462,10 +525,30 @@ class AutoResolverTest(TestCase):
         def factory(a: A):
             return B(a)
 
-        b = AutoResolver(B, ResolveBy.by_type_and_name).resolve(ctx)
+        b = AutoResolver(factory, ResolveBy.by_type_and_name).resolve(ctx)
 
         self.assertIsInstance(b, B)
         self.assertIs(a, b.a)
+
+    def test_function_with_dependency_resolved_by_name_and_type_missing_hint(self):
+        a = A()
+        ctx = Pytel({'a': a})
+
+        def factory(a):
+            return B(a)
+
+        with self.assertRaises(ValueError):
+            AutoResolver(factory, ResolveBy.by_type_and_name).resolve(ctx)
+
+    def test_function_with_dependency_resolved_by_name_and_type_wrong_type(self):
+        a = A()
+        ctx = Pytel({'a': a})
+
+        def factory(a:B):
+            return B(a)
+
+        with self.assertRaises(ValueError):
+            AutoResolver(factory, ResolveBy.by_type_and_name).resolve(ctx)
 
     def test_function_with_resolved_parameter(self):
         val = 'hello'
@@ -484,3 +567,32 @@ class AutoResolverTest(TestCase):
         b = AutoResolver(factory)(a=None).resolve(None)
         self.assertIsInstance(b, B)
         self.assertIs(None, b.a)
+
+    def test_function_with_vararg(self):
+        val = 'hello'
+
+        def factory(*a):
+            return B(a)
+
+        b = AutoResolver(factory)(a=val, ).resolve(None)
+        self.assertIsInstance(b, B)
+        self.assertEqual((val,), b.a)
+
+    def test_function_with_varkw(self):
+        val = 'hello'
+
+        def factory(**kwarg):
+            return B(**kwarg)
+
+        b = AutoResolver(factory)(kwarg={'a': val}).resolve(None)
+        self.assertIsInstance(b, B)
+        self.assertEqual(val, b.a)
+
+    def test_function_with_extra_args(self):
+        val = 'hello'
+
+        def factory(a):
+            return B(a)
+
+        with self.assertRaises(TypeError):
+            b = AutoResolver(factory)(a=val, b=object()).resolve(None)

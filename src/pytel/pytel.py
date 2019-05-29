@@ -1,3 +1,4 @@
+import abc
 import enum
 import inspect
 import logging
@@ -9,15 +10,19 @@ from .proxy import LazyLoadProxy
 log = logging.getLogger(__name__)
 
 
-class ObjectResolver:
+class ObjectResolver(abc.ABC):
+    @abc.abstractmethod
     def resolve(self, context):
-        pass
+        pass  # pragma: no cover
 
 
 class ResolveBy(enum.Enum):
     by_type = enum.auto()
     by_name = enum.auto()
     by_type_and_name = enum.auto()
+
+
+T = typing.TypeVar('T')
 
 
 class Pytel:
@@ -135,24 +140,20 @@ class Pytel:
     def keys(self):
         return self._objects.keys()
 
-    def find_one_by_type(self, cls: typing.Type):
+    def find_one_by_type(self, cls: typing.Type[T]) -> T:
         candidates = list(self.find_all_by_type(cls))
         if len(candidates) != 1:
             raise ValueError('Could not find single instance of ', cls, len(candidates))
         else:
             return candidates[0]
 
-    def find_all_by_type(self, cls) -> typing.Iterable:
+    def find_all_by_type(self, cls: typing.Type[T]) -> typing.List[T]:
         result = []
         for key, value in self._objects.items():
             if isinstance(value, ObjectResolver):
-                return_type = _get_return_type(value)
-                if return_type is cls:
-                    result.append(self._resolve(key, value))
-                elif return_type is None:
-                    actual_value = self._resolve(key, value)
-                    if isinstance(actual_value, cls):
-                        result.append(actual_value)
+                actual_value = self._resolve(key, value)
+                if isinstance(actual_value, cls):
+                    result.append(actual_value)
             elif isinstance(value, cls):
                 result.append(value)
 
@@ -178,13 +179,6 @@ def _is_special_name(name):
 
 def _is_dunder(name):
     return name.startswith('__') and name.endswith('__')
-
-
-def _get_return_type(factory) -> typing.Type:
-    if isinstance(factory, ObjectResolver):
-        return _get_return_type(factory.resolve)
-    else:
-        return inspect.getfullargspec(factory).annotations.get('return')
 
 
 class AutoResolver(ObjectResolver):
@@ -228,7 +222,7 @@ class AutoResolver(ObjectResolver):
         else:
             return self._resolve_dependency(context, name, arg_type)
 
-    def _resolve_dependency(self, ctx: Pytel, name: str, arg_class: typing.Type):
+    def _resolve_dependency(self, ctx: Pytel, name: str, arg_class: typing.Type[T]) -> T:
         if arg_class is Pytel:
             return ctx
 
@@ -237,15 +231,13 @@ class AutoResolver(ObjectResolver):
             raise ValueError('Unannotated argument', name, self._resolve_by)
 
         if self._resolve_by is ResolveBy.by_name or self._resolve_by is ResolveBy.by_type_and_name:
-            resolved = ctx._get(name)
+            resolved = ctx[name]
             if self._resolve_by is ResolveBy.by_type_and_name and not isinstance(resolved, arg_class):
                 raise ValueError('Named dependency not of required type', name, arg_class, __class__)
             return resolved
         else:
             return ctx.find_one_by_type(arg_class)
 
-
-T = typing.TypeVar('T')
 
 FactoryType = typing.Callable[..., T]
 
