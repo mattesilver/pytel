@@ -1,6 +1,15 @@
 A bag of objects for Python
 ===========================
 
+.. image:: https://img.shields.io/pypi/v/mattes-allegro-pl.svg
+    :target: https://pypi.org/project/mattes-allegro-pl/
+
+.. image:: https://travis-ci.com/mattesilver/pytel.svg
+  :target: https://travis-ci.com/mattesilver/pytel
+
+.. image:: https://codecov.io/gh/mattesilver/pytel/branch/master/graph/badge.svg
+  :target: https://codecov.io/gh/mattesilver/pytel
+
 For when your object graph is too big
 
 .. code-block:: python
