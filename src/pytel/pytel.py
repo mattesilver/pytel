@@ -1,61 +1,28 @@
 import abc
+import enum
+import inspect
+import logging
+import types
 import typing
 
 from .proxy import LazyLoadProxy
+
+log = logging.getLogger(__name__)
 
 
 class ObjectResolver(abc.ABC):
     @abc.abstractmethod
     def resolve(self, context):
-        pass
+        pass  # pragma: no cover
 
 
-class TypeWrapper(ObjectResolver):
-    """Allow adding lazily loaded instance to the context. The resulting object is a functor, call it to pass arguments
-     to the constructor
+class ResolveBy(enum.Enum):
+    by_type = enum.auto()
+    by_name = enum.auto()
+    by_type_and_name = enum.auto()
 
-     >>> context = Pytel()
-     >>> class A:
-     >>>   ...
-     Normal use:
-     >>> a=A()
-     Pytel use:
-     >>> context.a=A()
-     >>> a = context.a
-     Lazy loading
-     >>> context.a=lazy(A)
-     >>> a = context.a
-     Lazy loading with parameters:
-     >>> context.a = lazy(A)(...)
-     >>> a = context.a
-     """
 
-    def __init__(self, klass):
-        self._klass = klass
-        self._args = []
-        self._kwargs = {}
-
-    def __call__(self, *args, **kwargs):
-        self._args = args
-        self._kwargs = kwargs
-        return self
-
-    def resolve(self, context):
-        new_args = []
-        for i in range(len(self._args)):
-            arg = self._args[i]
-            while isinstance(arg, ObjectResolver):
-                arg = arg.resolve(context)
-            else:
-                new_args.append(arg)
-
-        new_kwargs = {}
-        for name, value in self._kwargs:
-            while isinstance(value, ObjectResolver):
-                value = value.resolve(context)
-            else:
-                new_kwargs[name] = value
-        return self._klass(*new_args, **self._kwargs)
+T = typing.TypeVar('T')
 
 
 class Pytel:
@@ -87,19 +54,56 @@ class Pytel:
 
     """
 
-    def __init__(self):
-        object.__setattr__(self, '_objects', {})
+    def __init__(self, init: dict = None):
+        objects = {}
+        object.__setattr__(self, '_objects', objects)
         object.__setattr__(self, '_stack', [])
 
+        if init:
+            for k, v in init.items():
+                self._set(k, v)
+
+        # init subclass
+        for t in [type(self)] + list(type(self).__bases__):
+            if t is Pytel:
+                break
+            for name, value in t.__dict__.items():
+                if not _is_dunder(name):
+                    if isinstance(value, types.FunctionType):
+                        self._set(name, AutoResolver(types.MethodType(value, self)))
+                    else:
+                        self._set(name, value)
+
     def __setattr__(self, name, value):
+        self._set(name, value)
+
+    def __delattr__(self, item):
+        if item not in self._objects:
+            raise AttributeError(item)
+        else:
+            del self._objects[item]
+
+    def __getattribute__(self, name: str):
+        # __getattribute__ is required instead of __getattr__ to kidnap accessing the subclasses' methods
+        if _is_special_name(name):
+            return object.__getattribute__(self, name)
+
+        try:
+            return self._get(name)
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def _get(self, name):
+        obj = self._objects[name]
+        return self._resolve(name, obj)
+
+    def _set(self, name, value):
+        if value is None:
+            raise ValueError('None value', name)
+        log.debug('Registering %s := %s', name, value)
         self._objects[name] = value
 
-    def __getattr__(self, name):
-        try:
-            obj = self._objects[name]
-        except KeyError:
-            raise AttributeError(name)
-
+    def _resolve(self, name, obj):
         if not isinstance(obj, ObjectResolver):
             return obj
         else:
@@ -113,27 +117,128 @@ class Pytel:
                 inst = obj.resolve(self)
                 if inst is None:
                     raise ValueError('None', name)
-                self._objects[name] = inst
+                self._set(name, inst)
                 return inst
             finally:
                 self._stack.pop()
 
+    def __len__(self):
+        return len(self._objects)
 
-class FunctionWrapper(ObjectResolver):
-    """
-    Allow to use arbitrary function to lazily create the object.
+    def __getitem__(self, item):
+        return self._get(item)
 
-    >>> context = Pytel()
-    >>> def mk_str(context):
-    >>>     return 'hello'
-    >>> context.a = func(mk_str)
+    def __setitem__(self, key, value):
+        self._set(key, value)
 
-    Now accessing context.a will call mk_str:
+    def __delitem__(self, key):
+        del self._objects[key]
 
-    >>> word = context.a
-    """
-    def __init__(self, fn: typing.Callable[[Pytel], object]):
-        self._fn = fn
+    def __contains__(self, item):
+        return item in self._objects
+
+    def keys(self):
+        return self._objects.keys()
+
+    def find_one_by_type(self, cls: typing.Type[T]) -> T:
+        candidates = list(self.find_all_by_type(cls))
+        if len(candidates) != 1:
+            raise ValueError('Could not find single instance of ', cls, len(candidates))
+        else:
+            return candidates[0]
+
+    def find_all_by_type(self, cls: typing.Type[T]) -> typing.List[T]:
+        result = []
+        for key, value in self._objects.items():
+            if isinstance(value, ObjectResolver):
+                actual_value = self._resolve(key, value)
+                if isinstance(actual_value, cls):
+                    result.append(actual_value)
+            elif isinstance(value, cls):
+                result.append(value)
+
+        return result
+
+    def items(self):
+        return self._objects.items()
+
+
+def _is_special_name(name):
+    return _is_dunder(name) or name in [
+        '_get',
+        '_objects',
+        '_resolve',
+        '_set',
+        '_stack',
+        'find_one_by_type',
+        'find_all_by_type',
+        'items',
+        'keys',
+    ]
+
+
+def _is_dunder(name):
+    return name.startswith('__') and name.endswith('__')
+
+
+class AutoResolver(ObjectResolver):
+    def __init__(self, factory: typing.Callable, resolve_by: ResolveBy = ResolveBy.by_name):
+        if factory is None:
+            raise ValueError('None for factory')
+        self._factory = factory
+        self._resolve_by = resolve_by
+        self._xargs = {}
+
+    def __call__(self, **kwargs) -> 'AutoResolver':
+        self._xargs = kwargs.copy()
+        return self
 
     def resolve(self, context):
-        return self._fn(context)
+        spec = inspect.getfullargspec(self._factory)
+
+        args_list = spec.args if isinstance(self._factory, types.FunctionType) else spec.args[1:]
+        if spec.varargs:
+            args_list.append(spec.varargs)
+        args = [self._resolve_argument(key, context, spec.annotations.get(key)) for key in args_list]
+
+        kwargs = {key: self._resolve_argument(key, context, spec.annotations.get(key)) for key in spec.kwonlyargs}
+
+        if spec.varkw and spec.varkw in self._xargs:
+            kwargs.update(self._xargs.pop(spec.varkw))
+
+        if self._xargs:
+            raise TypeError(
+                f"{self._factory.__name__}() got an unexpected keyword argument '{list(self._xargs.keys()).pop()}'")
+
+        result = self._factory(*args, **kwargs)
+        if result is not None:
+            return result
+        else:
+            raise ValueError('Callable returned None', self._factory)
+
+    def _resolve_argument(self, name, context, arg_type):
+        if name in self._xargs:
+            return self._xargs.pop(name)
+        else:
+            return self._resolve_dependency(context, name, arg_type)
+
+    def _resolve_dependency(self, ctx: Pytel, name: str, arg_class: typing.Type[T]) -> T:
+        if arg_class is Pytel:
+            return ctx
+
+        if (self._resolve_by is ResolveBy.by_type or self._resolve_by is ResolveBy.by_type_and_name) and \
+                arg_class is None:
+            raise ValueError('Unannotated argument', name, self._resolve_by)
+
+        if self._resolve_by is ResolveBy.by_name or self._resolve_by is ResolveBy.by_type_and_name:
+            resolved = ctx[name]
+            if self._resolve_by is ResolveBy.by_type_and_name and not isinstance(resolved, arg_class):
+                raise ValueError('Named dependency not of required type', name, arg_class, __class__)
+            return resolved
+        else:
+            return ctx.find_one_by_type(arg_class)
+
+
+FactoryType = typing.Callable[..., T]
+
+auto: typing.Callable[[FactoryType, typing.Optional[ResolveBy]], T] = AutoResolver
