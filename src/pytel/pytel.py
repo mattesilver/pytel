@@ -1,4 +1,7 @@
+import enum
+import inspect
 import logging
+import types
 import typing
 
 from .proxy import LazyLoadProxy
@@ -11,52 +14,10 @@ class ObjectResolver:
         pass
 
 
-class TypeWrapper(ObjectResolver):
-    """Allow adding lazily loaded instance to the context. The resulting object is a functor, call it to pass arguments
-     to the constructor
-
-     >>> context = Pytel()
-     >>> class A:
-     >>>   ...
-     Normal use:
-     >>> a=A()
-     Pytel use:
-     >>> context.a=A()
-     >>> a = context.a
-     Lazy loading
-     >>> context.a=lazy(A)
-     >>> a = context.a
-     Lazy loading with parameters:
-     >>> context.a = lazy(A)(...)
-     >>> a = context.a
-     """
-
-    def __init__(self, klass):
-        self._klass = klass
-        self._args = []
-        self._kwargs = {}
-
-    def __call__(self, *args, **kwargs):
-        self._args = args
-        self._kwargs = kwargs
-        return self
-
-    def resolve(self, context):
-        new_args = []
-        for i in range(len(self._args)):
-            arg = self._args[i]
-            while isinstance(arg, ObjectResolver):
-                arg = arg.resolve(context)
-            else:
-                new_args.append(arg)
-
-        new_kwargs = {}
-        for name, value in self._kwargs:
-            while isinstance(value, ObjectResolver):
-                value = value.resolve(context)
-            else:
-                new_kwargs[name] = value
-        return self._klass(*new_args, **self._kwargs)
+class ResolveBy(enum.Enum):
+    by_type = enum.auto()
+    by_name = enum.auto()
+    by_type_and_name = enum.auto()
 
 
 class Pytel:
@@ -103,8 +64,8 @@ class Pytel:
                 break
             for name, value in t.__dict__.items():
                 if not _is_dunder(name):
-                    if callable(value) and not isinstance(value, type):
-                        self._set(name, FunctionWrapper(value))
+                    if isinstance(value, types.FunctionType):
+                        self._set(name, AutoResolver(types.MethodType(value, self)))
                     else:
                         self._set(name, value)
 
@@ -128,13 +89,12 @@ class Pytel:
             raise AttributeError(name) from None
 
     def _get(self, name):
-        _objects = self._objects
-        if name in _objects:
-            return self._resolve(name, _objects[name])
-        else:
-            raise KeyError(name)
+        obj = self._objects[name]
+        return self._resolve(name, obj)
 
     def _set(self, name, value):
+        if value is None:
+            raise ValueError('None value', name)
         log.debug('Registering %s := %s', name, value)
         self._objects[name] = value
 
@@ -175,34 +135,118 @@ class Pytel:
     def keys(self):
         return self._objects.keys()
 
+    def find_one_by_type(self, cls: typing.Type):
+        candidates = list(self.find_all_by_type(cls))
+        if len(candidates) != 1:
+            raise ValueError('Could not find single instance of ', cls, len(candidates))
+        else:
+            return candidates[0]
+
+    def find_all_by_type(self, cls) -> typing.Iterable:
+        result = []
+        for key, value in self._objects.items():
+            if isinstance(value, ObjectResolver):
+                return_type = _get_return_type(value)
+                if return_type is cls:
+                    result.append(self._resolve(key, value))
+                elif return_type is None:
+                    actual_value = self._resolve(key, value)
+                    if isinstance(actual_value, cls):
+                        result.append(actual_value)
+            elif isinstance(value, cls):
+                result.append(value)
+
+        return result
+
+    def items(self):
+        return self._objects.items()
+
 
 def _is_special_name(name):
-    return _is_dunder(name) or name in ['_objects', '_stack', '_get', '_set', '_resolve', 'keys']
+    return _is_dunder(name) or name in [
+        '_get',
+        '_objects',
+        '_resolve',
+        '_set',
+        '_stack',
+        'find_one_by_type',
+        'find_all_by_type',
+        'items',
+        'keys',
+    ]
 
 
 def _is_dunder(name):
     return name.startswith('__') and name.endswith('__')
 
 
-class FunctionWrapper(ObjectResolver):
-    """
-    Allow to use arbitrary function to lazily create the object.
+def _get_return_type(factory) -> typing.Type:
+    if isinstance(factory, ObjectResolver):
+        return _get_return_type(factory.resolve)
+    else:
+        return inspect.getfullargspec(factory).annotations.get('return')
 
-    >>> context = Pytel()
-    >>> def mk_str(context):
-    >>>     return 'hello'
-    >>> context.a = func(mk_str)
 
-    Now accessing context.a will call mk_str:
+class AutoResolver(ObjectResolver):
+    def __init__(self, factory: typing.Callable, resolve_by: ResolveBy = ResolveBy.by_name):
+        if factory is None:
+            raise ValueError('None for factory')
+        self._factory = factory
+        self._resolve_by = resolve_by
+        self._xargs = {}
 
-    >>> word = context.a
-    """
-
-    def __init__(self, fn: typing.Callable[[Pytel], object]):
-        self._fn = fn
+    def __call__(self, **kwargs) -> 'AutoResolver':
+        self._xargs = kwargs.copy()
+        return self
 
     def resolve(self, context):
-        result = self._fn(context)
-        if result is None:
-            raise ValueError
-        return result
+        spec = inspect.getfullargspec(self._factory)
+
+        args_list = spec.args if isinstance(self._factory, types.FunctionType) else spec.args[1:]
+        if spec.varargs:
+            args_list.append(spec.varargs)
+        args = [self._resolve_argument(key, context, spec.annotations.get(key)) for key in args_list]
+
+        kwargs = {key: self._resolve_argument(key, context, spec.annotations.get(key)) for key in spec.kwonlyargs}
+
+        if spec.varkw and spec.varkw in self._xargs:
+            kwargs.update(self._xargs.pop(spec.varkw))
+
+        if self._xargs:
+            raise TypeError(
+                f"{self._factory.__name__}() got an unexpected keyword argument '{list(self._xargs.keys()).pop()}'")
+
+        result = self._factory(*args, **kwargs)
+        if result is not None:
+            return result
+        else:
+            raise ValueError('Callable returned None', self._factory)
+
+    def _resolve_argument(self, name, context, arg_type):
+        if name in self._xargs:
+            return self._xargs.pop(name)
+        else:
+            return self._resolve_dependency(context, name, arg_type)
+
+    def _resolve_dependency(self, ctx: Pytel, name: str, arg_class: typing.Type):
+        if arg_class is Pytel:
+            return ctx
+
+        if (self._resolve_by is ResolveBy.by_type or self._resolve_by is ResolveBy.by_type_and_name) and \
+                arg_class is None:
+            raise ValueError('Unannotated argument', name, self._resolve_by)
+
+        if self._resolve_by is ResolveBy.by_name or self._resolve_by is ResolveBy.by_type_and_name:
+            resolved = ctx._get(name)
+            if self._resolve_by is ResolveBy.by_type_and_name and not isinstance(resolved, arg_class):
+                raise ValueError('Named dependency not of required type', name, arg_class, __class__)
+            return resolved
+        else:
+            return ctx.find_one_by_type(arg_class)
+
+
+T = typing.TypeVar('T')
+
+FactoryType = typing.Callable[..., T]
+
+auto: typing.Callable[[FactoryType, typing.Optional[ResolveBy]], T] = AutoResolver

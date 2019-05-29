@@ -1,342 +1,486 @@
-import logging
-import sys
+import unittest
 from unittest import TestCase
 
-from pytel import __version__, Pytel, lazy, func
-from pytel.pytel import FunctionWrapper
+from pytel import Pytel, auto, ResolveBy, ObjectResolver
+from pytel.proxy import LazyLoadProxy
+from pytel.pytel import AutoResolver
 
-log = logging.getLogger(__name__)
+
+class A:
+    pass
+
+
+class B:
+    def __init__(self, a: A):
+        self.a = a
 
 
 class test_Pytel(TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
-
-    def test_version(self):
-        assert __version__ == '0.1.0'
-
-    def test_object_resolution(self):
-        class A:
-            def __init__(self, context: Pytel):
-                self.b = context.b
-
-        class B:
-            pass
-
+    def test_assignment_by_setattr(self):
+        # given
         context = Pytel()
-        context.a = lazy(A)(context)
-        context.b = B()
+        a = object()
 
-        self.assertIsInstance(context.a, A)
-        self.assertIsInstance(context.b, B)
-        self.assertIs(context.a.b, context.b)
+        # when
+        context.a = a
 
-    def test_lazy_dependency_creation_and_resolution(self):
-        class A:
-            def __init__(self, context: Pytel):
-                self.b = context.b
+        # then
+        self.assertIs(a, context._objects['a'])
 
-        class B:
-            pass
-
-        context = Pytel()
-        context.a = lazy(A)(context)
-        context.b = lazy(B)
-
-        self.assertIsInstance(context.a, A)
-        self.assertIsInstance(context.b, B)
-        self.assertIs(context.a.b, context.b)
-
-    def test_init_with_param(self):
-        class A:
-            def __init__(self, word):
-                self.word = word
-
-        context = Pytel()
-        context.a = lazy(A)('hello')
-
-        self.assertIsInstance(context.a, A)
-        self.assertEqual(context.a.word, 'hello')
-
-    def test_dependency_cycle(self):
-        class A:
-            def __init__(self, context: Pytel):
-                self.b = context.b
-
-        class B:
-            def __init__(self, context: Pytel):
-                self.a = context.a
-
-        context = Pytel()
-        context.a = lazy(A)(context)
-        context.b = lazy(B)(context)
-
-        self.assertIsInstance(context.a, A)
-        self.assertIsInstance(context.b, B)
-
-        self.assertIs(context.a.b, context.b)
-        self.assertEqual(context.b.a, context.a)
-        self.assertIsNot(context.b.a, context.a)
-
-    def test_lazy_with_new(self):
-        class A:
-            def __new__(cls):
-                inst = super().__new__(cls)
-                inst.new_called = True
-                return inst
-
-        context = Pytel()
-        context.a = lazy(A)
-
-        self.assertTrue(context.a.new_called)
-
-    def test_lazy_with_new_with_context_param(self):
-        class A:
-            def __new__(cls, context: Pytel):
-                inst = super().__new__(cls)
-                inst.context_from_new = context
-                return inst
-
-            def __init__(self, a):
-                self.context_from_init = a
-
-        context = Pytel()
-        context.a = lazy(A)(context)
-
-        self.assertIs(context.a.context_from_new, context)
-        self.assertIs(context.a.context_from_init, context)
-
-    def test_redefine(self):
-        class A:
-            pass
-
-        class B:
-            pass
-
-        context = Pytel()
-        context.a = lazy(A)
-        self.assertIsInstance(context.a, A)
-
-        context.a = lazy(B)
-        self.assertIsInstance(context.a, B)
-
-    def test_cycle_with_redefine(self):
-        class A:
-            def __init__(self, context):
-                self.b = context.b
-
-        class B:
-            def __init__(self, context):
-                self.a = context.a
-
-        class C:
-            pass
-
-        context = Pytel()
-        context.a = lazy(A)(context)
-        context.b = lazy(B)(context)
-
-        self.assertIsInstance(context.a, A)
-        self.assertIsInstance(context.b, B)
-
-        self.assertIs(context.a.b, context.b)
-        self.assertEqual(context.b.a, context.a)
-        self.assertIsNot(context.b.a, context.a)
-
-        context.b = lazy(C)
-
-        self.assertIsInstance(context.a.b, B)
-
-    def test_undefined(self):
+    def test_assignment_by_setattr_none_error(self):
+        # given
         context = Pytel()
 
-        def get_a():
-            context.a
+        # then
+        with self.assertRaises(ValueError):
+            context.a = None
 
-        self.assertRaises(AttributeError, get_a)
+    def test_assignment_setitem(self):
+        # given
+        ctx = Pytel()
+        a = object()
 
-    def test_func(self):
-        a_created = [False]
+        # when
+        ctx['a'] = a
 
-        class A:
-            def __init__(self, word, b):
-                self.word = word,
-                self.b = b
+        # then
+        self.assertIs(a, ctx._objects['a'])
 
-        class B:
-            pass
+    def test_assignment_setitem_none_error(self):
+        # given
+        ctx = Pytel()
 
-        class C:
-            def __init__(self, context):
-                self.a = context.a
+        # then
+        with self.assertRaises(ValueError):
+            # when
+            ctx['a'] = None
 
-        def new_a(context):
-            a_created[0] = True
-            return A('hello', context.b)
+    def test_resolve_from_instance_method(self):
+        # given
+        a = object()
 
-        context = Pytel()
-        context.a = func(new_a)
-        context.b = B()
-        context.c = lazy(C)(context)
-        self.assertFalse(a_created[0])
+        class Context(Pytel):
+            def a(self):
+                return a
 
-        # getting c triggers new_a
-        c = context.c
-        self.assertTrue(a_created[0])
+        # when
+        ctx = Context()
 
-        self.assertIsInstance(context.a, A)
+        # then
+        self.assertIs(a, ctx.a)
 
-    def test_func_returning_none_raises_ValueError(self):
-        class A:
-            def __init__(self, context):
-                self.b = context.b
+    def test_resolve_from_instance_method_none_error(self):
+        # given
+        class Context(Pytel):
+            def a(self):
+                return None
 
-        def new_b(_):
-            return None
+        # when
+        ctx = Context()
 
-        context = Pytel()
-        context.b = func(new_b)
-        context.a = lazy(A)(context)
+        # then
+        self.assertRaises(ValueError, lambda: ctx.a)
 
-        def get_a():
-            context.a
+    @unittest.skip('@classmethod currently not supported')
+    def test_resolve_from_class_method(self):
+        a = object()
 
-        self.assertRaises(ValueError, get_a)
-
-    def test_method_as_func(self):
-        class A:
+        # given
+        class Context(Pytel):
             @classmethod
-            def factory(cls, _):
-                return cls()
+            def a(cls):
+                return a
 
-        ctx = Pytel()
-        ctx.a = func(A.factory)
-        self.assertIsInstance(ctx.a, A)
+        # when
+        ctx = Context()
 
-    def test_lambda_func(self):
-        class A:
-            pass
+        # given
+        self.assertIs(a, ctx.a)
 
-        ctx = Pytel()
-        ctx.a = func(lambda ctx: A())
-        self.assertIsInstance(ctx.a, A)
-
-    def test_subclassing_basic(self):
-        class A:
-            pass
-
+    @unittest.skip('@classmethod currently not supported')
+    def test_resolve_from_class_method_none_error(self):
         class Context(Pytel):
-            def a(self):
-                return A()
+            @classmethod
+            def a(cls):
+                return None
 
         ctx = Context()
-        self.assertIsInstance(ctx._objects['a'], FunctionWrapper)
-        self.assertIsInstance(ctx.a, A)
+        self.assertRaises(AttributeError, lambda: ctx.a)
 
-    def test_subclassing_with_dep(self):
-        class A:
-            pass
+    @unittest.skip('@staticmethod currently not supported')
+    def test_resolve_from_static_method(self):
+        a = object()
 
-        class B:
-            def __init__(self, a):
-                self.a = a
-
+        # given
         class Context(Pytel):
-            def a(self):
-                return A()
+            @staticmethod
+            def a():
+                return a
+
+        # when
+        ctx = Context()
+
+        # givenó
+        # self.assertIs(a, ctx.a)
+        self.assertIsInstance(ctx._objects['a'], AutoResolver)
+
+    @unittest.skip('@staticmethod currently not supported')
+    def test_resolve_from_static_method_none_error(self):
+        class Context(Pytel):
+            @staticmethod
+            def a():
+                return None
 
         ctx = Context()
-        ctx.b = func(lambda ctx: B(ctx.a))
-        self.assertIsInstance(ctx.b.a, A)
+        self.assertRaises(AttributeError, lambda: ctx.a)
 
-    def test_subclass_with_inst_attr(self):
-        t = test_Pytel.T()
+    def test_retrieval_by_getattr(self):
+        # given
+        context = Pytel()
+        a = object()
 
-        class I(Pytel):
-            def __init__(self):
-                super().__init__()
-                self.t = t
+        # when
+        context.a = a
 
-        ctx = I()
-        self.assertEqual(t, ctx._objects['t'])
+        # then
+        self.assertIs(a, context.a)
 
-    def test_subclass_with_cls_attr(self):
-        t = test_Pytel.T()
-
-        class J(Pytel):
-            a = t
-
-        ctx = J()
-
-        self.assertEqual(t, ctx.a)
-
-    def test_init_from_dict(self):
-        class A:
-            pass
-
+    def test_retrieval_by_getitem(self):
+        # given
+        ctx = Pytel()
         a = A()
-        ctx = Pytel({'a': a})
-        self.assertEqual(a, ctx._objects['a'])
 
-    class T:
-        def __init__(self, *args):
+        # when
+        ctx.a = a
+
+        # then
+        self.assertEqual(a, ctx['a'])
+
+    def test_find_one_by_type(self):
+        class A1:
             pass
+
+        ctx = Pytel()
+        ctx.a = A()
+        ctx.b = A1()
+
+        self.assertEqual(ctx.a, ctx.find_one_by_type(A))
+
+    def test_find_one_by_type_fail_on_empty(self):
+        ctx = Pytel()
+
+        with self.assertRaises(ValueError):
+            ctx.find_one_by_type(A)
+
+    def test_find_one_by_type_fail_on_miss(self):
+        ctx = Pytel()
+        ctx.a = object()
+
+        with self.assertRaises(ValueError):
+            ctx.find_one_by_type(A)
+
+    def test_find_one_by_type_fail_on_double(self):
+        ctx = Pytel()
+        ctx.a = A()
+        ctx.b = A()
+
+        with self.assertRaises(ValueError):
+            ctx.find_one_by_type(A)
+
+    def test_find_one_by_type_fail_on_double_inherit(self):
+        class A1(A):
+            pass
+
+        ctx = Pytel()
+        ctx.a = A()
+        ctx.b = A1()
+
+        with self.assertRaises(ValueError):
+            ctx.find_one_by_type(A)
+
+    def test_find_all_by_type(self):
+        class F1:
+            pass
+
+        class F2:
+            pass
+
+        class F3(F2):
+            pass
+
+        ctx = Pytel()
+        ctx.a = auto(F1)
+        ctx.b = auto(F2)
+        ctx.c = auto(F3)
+
+        self.assertEqual([ctx.a], ctx.find_all_by_type(F1))
+        self.assertEqual({ctx.b, ctx.c}, {*ctx.find_all_by_type(F2)})
+        self.assertEqual([ctx.c], ctx.find_all_by_type(F3))
+        self.assertEqual({ctx.a, ctx.b, ctx.c}, {*ctx.find_all_by_type(object)})
+        self.assertEqual([], ctx.find_all_by_type(str))
 
     def test_len(self):
-        ctx = Pytel({'a': self.T()})
+        # given
+        ctx = Pytel()
+
+        # then
+        self.assertEqual(0, len(ctx))
+
+        # given
+        ctx.a = object()
+
+        # then
         self.assertEqual(1, len(ctx))
-
-    def test_get_item(self):
-        ctx = Pytel()
-        t = self.T()
-        ctx.t = t
-        self.assertEqual(t, ctx['t'])
-
-    def test_set_item(self):
-        ctx = Pytel()
-        t = self.T()
-        ctx['t'] = t
-        self.assertEqual(t, ctx._objects['t'])
-
-    def test_del_item(self):
-        ctx = Pytel()
-        t = self.T()
-        ctx.t = t
-        del ctx['t']
-        self.assertNotIn('t', ctx._objects)
-
-    def test_del(self):
-        ctx = Pytel()
-        t = self.T()
-        ctx.t = t
-        del ctx.t
-        self.assertNotIn('t', ctx._objects)
-
-    def test_contains(self):
-        ctx = Pytel()
-        t = self.T()
-        ctx.t = t
-        self.assertIn('t', ctx)
 
     def test_keys(self):
         ctx = Pytel()
-        ctx.t = self.T()
+        ctx.a = object()
 
-        self.assertIn('t', ctx.keys())
+        self.assertEqual(['a'], list(ctx.keys()))
 
-    def test_keys_subclass(self):
-        class Context(Pytel):
-            def t(self):
-                return test_Pytel.T()
-
-        ctx = Context()
-
-        self.assertIn('t', ctx.keys())
-
-    def test_func_none(self):
+    def test_in(self):
         ctx = Pytel()
-        ctx.a = func(lambda ctx: None)
+        ctx.a = object()
+
+        self.assertIn('a', ctx)
+
+    def test_items(self):
+        a = object()
+        ctx = Pytel()
+        ctx.a = a
+
+        self.assertEqual({'a': a}.items(), ctx.items())
+
+    def test_delitem(self):
+        # given
+        ctx = Pytel()
+        ctx.a = object()
+
+        # when
+        del ctx['a']
+
+        # then
+        self.assertNotIn('a', ctx._objects)
+
+    def test_delattr(self):
+        ctx = Pytel()
+        ctx.a = object()
+        del ctx.a
+        self.assertNotIn('a', ctx._objects)
+
+    def test_resolution_of_object_resolver(self):
+        # given
+        ctx = Pytel()
+        a = object()
+
+        class TestObjectResolver(ObjectResolver):
+            def resolve(self, ctx):
+                return a
+
+        # when
+        ctx.a = TestObjectResolver()
+
+        # then
+        self.assertEqual(a, ctx.a)
+
+    def test_init_from_dict(self):
+        a = object()
+        ctx = Pytel({'a': a})
+        self.assertEqual(a, ctx._objects['a'])
+
+    def test_init_from_dict_none_error(self):
+        with self.assertRaises(ValueError):
+            ctx = Pytel({'a': None})
+
+    def test_retrieve_missing_with_getattr(self):
+        context = Pytel()
+
+        self.assertRaises(AttributeError, lambda: context.a)
+
+    def test_retrieve_missing_with_getitem(self):
+        context = Pytel()
+
+        self.assertRaises(KeyError, lambda: context['a'])
+
+    def test_dependency_cycle(self):
+        class Z:
+            def __init__(self, context: Pytel):
+                self.b = context.b
+
+        class Y:
+            def __init__(self, context: Pytel):
+                self.a = context.a
+
+        context = Pytel()
+        context.a = auto(Z)
+        context.b = auto(Y)
+
+        self.assertIsInstance(context.a, Z)
+        self.assertIsInstance(context.b, Y)
+
+        self.assertIs(context.a.b, context.b)
+        self.assertEqual(context.b.a, context.a)
+        self.assertIsInstance(context.b.a, LazyLoadProxy)
+
+    def test_subclass_with_inst_attr(self):
+        a = object()
+
+        class TestContext(Pytel):
+            def __init__(self):
+                super().__init__()
+                self.a = a
+
+        ctx = TestContext()
+        self.assertEqual(a, ctx._objects['a'])
+
+    def test_subclass_with_inst_attr_none_error(self):
+        class TestContext(Pytel):
+            def __init__(self):
+                super().__init__()
+                self.a = None
+
+        self.assertRaises(ValueError, TestContext)
+
+    def test_subclass_with_cls_attr(self):
+        obj = object()
+
+        class TestContext(Pytel):
+            a = obj
+
+        ctx = TestContext()
+
+        self.assertEqual(obj, ctx._objects['a'])
+
+    def test_subclass_with_cls_attr_none_errror(self):
+        class TestContext(Pytel):
+            a = None
+
+        self.assertRaises(ValueError, TestContext)
+
+
+class AutoResolverTest(TestCase):
+    def test_with_none_as_callable(self):
+        with self.assertRaises(ValueError):
+            AutoResolver(None)
+
+    def test_no_arg_function(self):
+        a = object()
+
+        def factory():
+            return a
+
+        result = AutoResolver(factory).resolve(None)
+        self.assertEqual(a, result)
+
+    def test_no_arg_function_none_error(self):
+        def factory():
+            return None
 
         with self.assertRaises(ValueError):
-            a = ctx.a
+            AutoResolver(factory).resolve(None)
+
+    def test_no_arg_ctor(self):
+        result = AutoResolver(A).resolve(None)
+
+        self.assertIsInstance(result, A)
+
+    def test_no_arg_inst_method(self):
+        a = object()
+
+        class Factory:
+            def a(self):
+                return a
+
+        result = AutoResolver(Factory().a).resolve(None)
+
+        self.assertIs(a, result)
+
+    def test_classmethod_factory(self):
+        a = object()
+
+        class Factory:
+            @classmethod
+            def factory(cls):
+                return a
+
+        result = auto(Factory.factory).resolve(None)
+        self.assertIs(a, result)
+
+    def test_staticmethod_factory(self):
+        a = object()
+
+        class Factory:
+            @staticmethod
+            def factory():
+                return a
+
+        self.assertEqual(a, auto(Factory.factory).resolve(None))
+
+    def test_function_with_named_depedency(self):
+        a = A()
+
+        def factory(a):
+            return B(a)
+
+        ctx = Pytel({'a': a})
+        b = AutoResolver(factory).resolve(ctx)
+        self.assertIsInstance(b, B)
+        self.assertIs(a, b.a)
+
+    def test_ctor_with_named_dependency(self):
+        a = A()
+        ctx = Pytel({'a': a})
+        b = AutoResolver(B).resolve(ctx)
+
+        self.assertIsInstance(b, B)
+        self.assertIs(a, b.a)
+
+    def test_function_with_dependency_missing_from_context(self):
+        def factory(a):
+            return B(a)
+
+        with self.assertRaises(KeyError):
+            AutoResolver(factory).resolve(Pytel())
+
+    def test_function_with_dependency_resolved_by_type(self):
+        a = A()
+        ctx = Pytel({'b': a})
+
+        def factory(a: A):
+            return B(a)
+
+        b = AutoResolver(B, ResolveBy.by_type).resolve(ctx)
+
+        self.assertIsInstance(b, B)
+        self.assertIs(a, b.a)
+
+    def test_function_with_dependency_resolved_by_name_and_type(self):
+        a = A()
+        a2 = A()
+        ctx = Pytel({'a': a, 'a2': a2})
+
+        def factory(a: A):
+            return B(a)
+
+        b = AutoResolver(B, ResolveBy.by_type_and_name).resolve(ctx)
+
+        self.assertIsInstance(b, B)
+        self.assertIs(a, b.a)
+
+    def test_function_with_resolved_parameter(self):
+        val = 'hello'
+
+        def factory(a):
+            return B(a)
+
+        b = AutoResolver(factory)(a=val).resolve(None)
+        self.assertIsInstance(b, B)
+        self.assertIs(val, b.a)
+
+    def test_function_with_parameter_resolved_to_none(self):
+        def factory(a):
+            return B(a)
+
+        b = AutoResolver(factory)(a=None).resolve(None)
+        self.assertIsInstance(b, B)
+        self.assertIs(None, b.a)
