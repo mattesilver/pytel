@@ -25,6 +25,37 @@ class ResolveBy(enum.Enum):
 T = typing.TypeVar('T')
 
 
+class ObjectDescriptor(typing.Generic[T]):
+    def __init__(self, factory: typing.Callable[..., T], dependency_types: typing.Mapping[str, typing.Type],
+                 return_type: typing.Type[T]):
+        self._factory = factory
+        self._dep_types = dependency_types
+        self._type = return_type
+        self._deps = {}
+
+        def instantiate(deps: typing.Mapping[str, typing.Any]) -> T:
+            pass
+
+        def missing_deps() -> typing.Mapping[str, typing.Type]:
+            pass
+
+
+class ObjectWrapper(typing.Generic[T]):
+    def __init__(self, descriptor: ObjectDescriptor, inst: T):
+        self._desc = descriptor
+        self._inst = inst
+
+    def __set__(self, instance, value):
+        self._inst = value
+
+    def __get__(self, instance, owner):
+        return self._inst
+
+    @property
+    def descriptor(self):
+        return self._desc
+
+
 class Pytel:
     """
     Provide a dependency-injection-like mechanism for loose coupling
