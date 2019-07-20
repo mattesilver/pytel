@@ -1,8 +1,8 @@
 A bag of objects for Python
 ===========================
 
-.. image:: https://img.shields.io/pypi/v/mattes-allegro-pl.svg
-    :target: https://pypi.org/project/mattes-allegro-pl/
+.. image:: https://img.shields.io/pypi/v/pytel-inject.svg?style=flat
+    :target: https://pypi.org/project/pytel-inject/
 
 .. image:: https://travis-ci.com/mattesilver/pytel.svg
   :target: https://travis-ci.com/mattesilver/pytel

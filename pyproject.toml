@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "pytel-inject"
-version = "0.2.0"
+version = "0.2.2"
 description = "Injection of dependencies for python 3"
 authors = ["Rafal Krupinski"]
 packages = [{include = 'pytel', from = 'src'}]
 license = "Apache-2.0"
 repository = 'https://github.com/mattesilver/pytel'
-keywords = ['injection of dependencies']
+keywords = ['injection-of-dependencies']
 readme = 'README.rst'
 
 [tool.poetry.dependencies]
