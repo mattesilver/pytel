@@ -1,3 +1,4 @@
 __version__ = '0.2.2'
 
-from .pytel import auto, ObjectResolver, Pytel, ResolveBy
+from .context import PytelContext, FactoryType
+from .pytel import ContextCreator, Pytel
