@@ -1,37 +1,37 @@
 import inspect
 import logging
-from typing import Optional, Type, TypeVar, Union, Callable, Generic, List, Dict, Iterable
+import typing
 
 log = logging.getLogger(__name__)
 
-T = TypeVar('T')
-FactoryType = Union[T, Callable[..., T]]
+T = typing.TypeVar('T')
+FactoryType = typing.Union[T, typing.Callable[..., T]]
 _K_RETURN = 'return'
 
 
-class ObjectDescriptor(Generic[T]):
-    def __init__(self, factory: Optional[FactoryType],
-                 _type: Type[T],
-                 deps: Dict[str, Type]
+class ObjectDescriptor(typing.Generic[T]):
+    def __init__(self, factory: typing.Optional[FactoryType],
+                 name: str,
+                 _type: typing.Type[T],
+                 deps: typing.Dict[str, typing.Type]
                  ):
         self._factory = factory
+        self._name = name
         self._type = _type
         self._deps = deps
-        self._instance: Optional[T] = None
+        self._instance: typing.Optional[T] = None
 
     @classmethod
-    def from_(cls, obj) -> 'ObjectDescriptor':
+    def from_(cls, name, obj) -> 'ObjectDescriptor':
         if obj is None:
             raise ValueError(None)
-        elif isinstance(obj, staticmethod):
-            return ObjectDescriptor.from_callable(obj.__func__)
         elif isinstance(obj, type) or callable(obj):
-            return ObjectDescriptor.from_callable(obj)
+            return ObjectDescriptor.from_callable(name, obj)
         else:
-            return ObjectDescriptor.from_object(obj)
+            return ObjectDescriptor.from_object(name, obj)
 
     @classmethod
-    def from_callable(cls, factory: FactoryType) -> 'ObjectDescriptor':
+    def from_callable(cls, name, factory: FactoryType) -> 'ObjectDescriptor':
         assert factory is not None
         spec = inspect.getfullargspec(factory)
         if isinstance(factory, type):
@@ -40,38 +40,31 @@ class ObjectDescriptor(Generic[T]):
             if _K_RETURN in spec.annotations:
                 t = spec.annotations[_K_RETURN]
                 if t is None:
-                    raise TypeError('Callable type hint is None', factory)
+                    raise TypeError(name, 'Callable type hint is None', factory)
             else:
-                raise TypeError('None type')
+                raise TypeError(name, 'None type')
 
-        try:
-            deps = ObjectDescriptor._spec_to_deps(spec)
-        except ValueError as e:
-            raise ValueError(str(factory)) from e
+        deps = ObjectDescriptor._spec_to_deps(spec)
 
         log.debug("Dependencies for %s: %s", factory.__qualname__, deps)
-        return ObjectDescriptor(factory, t, deps)
+        return ObjectDescriptor(factory, name, t, deps)
 
     @classmethod
-    def from_staticmethod(cls, creator, value: staticmethod) -> 'ObjectDescriptor':
-        pass
-
-    @classmethod
-    def from_object(cls, value: object) -> 'ObjectDescriptor':
-        assert value is not None
-        result = ObjectDescriptor(None, type(value), {})
+    def from_object(cls, name, value: object) -> 'ObjectDescriptor':
+        assert value is not None, f'{name} is None'
+        result = ObjectDescriptor(None, name, type(value), {})
         result._instance = value
         return result
 
     @staticmethod
-    def _spec_to_deps(spec: inspect.FullArgSpec) -> Dict[str, Type]:
+    def _spec_to_deps(spec: inspect.FullArgSpec) -> typing.Dict[str, typing.Type]:
         args = spec.args.copy()
         if len(args) > 0 and args[0] == 'self':
             args = args[1:]
         return {key: _assert_not_none(key, spec.annotations.get(key)) for key in args}
 
     def __repr__(self):
-        return "%s(%r)" % (self.__class__, self.__dict__)
+        return f'<{self.__class__.__name__}> {self._name}: {self._type.__name__}'
 
     def __eq__(self, other):
         if isinstance(other, ObjectDescriptor):
@@ -79,7 +72,7 @@ class ObjectDescriptor(Generic[T]):
                    self._type == other._type and \
                    self._deps == other._deps
         else:
-            raise NotImplemented
+            return NotImplemented
 
     @property
     def object_type(self):
@@ -98,7 +91,7 @@ def _assert_not_none(name, obj):
 
 
 class _DependencyChecker:
-    def __init__(self, map: Dict[str, ObjectDescriptor]):
+    def __init__(self, map: typing.Dict[str, ObjectDescriptor]):
         self._map = map
         self._clean = []
 
@@ -112,12 +105,12 @@ class _DependencyChecker:
     def check_defs(self, name: str, descr: ObjectDescriptor):
         for dep_name, dep_type in descr.dependencies.items():
             if dep_name not in self._map.keys():
-                raise ValueError(f'Undefined dependency of {name}: {dep_name}')
+                raise ValueError(f'Unresolved dependency of {name} => {dep_name}: {dep_type}')
             if dep_type is not self._map[dep_name].object_type:
                 raise ValueError(
-                    f'Expectied {dep_name}:{dep_type}, but found {self._map[dep_name].object_type}')
+                    f'{descr._name}: {descr._type.__name__} has dependency {dep_name}: {dep_type.__name__}, but {dep_name} of type {self._map[dep_name].object_type.__name__}')
 
-    def check_cycles(self, name: str, stack: List[str]) -> None:
+    def check_cycles(self, name: str, stack: typing.List[str]) -> None:
         """
         :param name:
         :param stack: reverse dependencies excluding the current one
@@ -129,14 +122,8 @@ class _DependencyChecker:
             self.check_cycles(dep_name, stack + [name])
 
 
-class ObjectWrapper:
-    def __init__(self, descr: ObjectDescriptor, value=None):
-        self.descr: ObjectDescriptor = descr
-        self.value = value
-
-
 class PytelContext:
-    def __init__(self, d: Dict[str, ObjectDescriptor]):
+    def __init__(self, d: typing.Dict[str, ObjectDescriptor]):
         self._objects = d
 
     def get(self, name: str):
@@ -151,16 +138,6 @@ class PytelContext:
 
         resolved_deps = {dep_name: self.get(dep_name) for dep_name in descr.dependencies.keys()}
         return descr._factory(**resolved_deps)
-
-    def find_one_by_type(self, cls: Type[T]) -> T:
-        candidates = list(self.find_all_by_type(cls))
-        if len(candidates) != 1:
-            raise ValueError('Could not find single instance of ', cls, len(candidates))
-        else:
-            return candidates[0]
-
-    def find_all_by_type(self, cls: Type[T]) -> Iterable[T]:
-        return (self.get(name) for name, descr in self._objects.items() if isinstance(descr.object_type, cls))
 
     def keys(self):
         return self._objects.keys()

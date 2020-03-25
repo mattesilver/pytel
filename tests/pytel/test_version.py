@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest import TestCase
 
 import toml
@@ -5,9 +6,10 @@ import toml
 from pytel import __version__
 
 
-class ModuleTest(TestCase):
-    def get_project_version(self):
-        return toml.load('pyproject.toml')['tool']['poetry']['version']
+def get_project_version():
+    return toml.load(Path(__file__).parent / '../../pyproject.toml')['tool']['poetry']['version']
 
+
+class ModuleTest(TestCase):
     def test_version_matches(self):
-        self.assertEqual(self.get_project_version(), __version__)
+        self.assertEqual(get_project_version(), __version__)
