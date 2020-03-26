@@ -14,35 +14,18 @@ For when your object graph is too big
 
 .. code-block:: python
 
-  class A:
-    def __init__(self, context: Pytel):
-        self.b = context.b
+    class A:
+        def __init__(self, b: B):
+            self.b = b
 
-  class B:
-      pass
+    class B:
+        pass
 
-  context = Pytel()
-  context.a = lazy(A)(context)
-  context.b = lazy(B)
+    svc = {
+        'a': A,
+        'b': B,
+    }
+    context = Pytel(PytelContext(svc))
+    assert context.a.b == context.b
 
-  assert context.a.b == context.b
-
-Works with dependency cycles (through a proxy object):
-
-.. code-block:: python
-
-  class A:
-    def __init__(self, context: Pytel):
-      self.b = context.b
-
-  class B:
-    def __init__(self, context: Pytel):
-      self.a = context.a
-
-  context = Pytel()
-  context.a = lazy(A)(context)
-  context.b = lazy(B)(context)
-  
-  assert context.a.b == context.b
-  assert context.b.a == context.a
-  
+See .. _usage: https://github.com/mattesilver/pytel/blob/master/tests/pytel/test_usage.py for more cases
