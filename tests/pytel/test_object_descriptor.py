@@ -71,3 +71,11 @@ class TestObjectDescriptor(TestCase):
     def test_neq(self):
         descr = ObjectDescriptor.from_object('a', "str")
         self.assertFalse(descr == 1)
+
+    def test_callable_returns_none(self):
+        def returns_none() -> str:
+            return None
+
+        descr = ObjectDescriptor.from_callable('a', returns_none)
+        descr.resolve_dependencies(None)
+        self.assertRaises(ValueError, lambda: descr.instance)

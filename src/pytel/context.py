@@ -19,7 +19,20 @@ class ObjectDescriptor(typing.Generic[T]):
         self._name = name
         self._type = _type
         self._deps = deps
+        self._resolved_deps = None
         self._instance: typing.Optional[T] = None
+
+    def _resolve(self) -> T:
+        assert self._instance is None, 'Called factory on resolved object'
+
+        deps = {name: descr.instance for name, descr in self._resolved_deps.items()}
+        self._instance = self._factory(**deps)
+        if self._instance is None:
+            raise ValueError(self._name, 'Factory returned None')
+        return self._instance
+
+    def resolve_dependencies(self, resolver: typing.Callable[[str, typing.Type], 'ObjectDescriptor']):
+        self._resolved_deps = {name: resolver(name, typ) for name, typ in self._deps.items()}
 
     @classmethod
     def from_(cls, name, obj) -> 'ObjectDescriptor':
@@ -44,7 +57,7 @@ class ObjectDescriptor(typing.Generic[T]):
             else:
                 raise TypeError(name, 'None type')
 
-        deps = ObjectDescriptor._spec_to_deps(spec)
+        deps = spec_to_types(spec)
 
         log.debug("Dependencies for %s: %s", factory.__qualname__, deps)
         return ObjectDescriptor(factory, name, t, deps)
@@ -55,13 +68,6 @@ class ObjectDescriptor(typing.Generic[T]):
         result = ObjectDescriptor(None, name, type(value), {})
         result._instance = value
         return result
-
-    @staticmethod
-    def _spec_to_deps(spec: inspect.FullArgSpec) -> typing.Dict[str, typing.Type]:
-        args = spec.args.copy()
-        if len(args) > 0 and args[0] == 'self':
-            args = args[1:]
-        return {key: _assert_not_none(key, spec.annotations.get(key)) for key in args}
 
     def __repr__(self):
         return f'<{self.__class__.__name__}> {self._name}: {self._type.__name__}'
@@ -75,17 +81,30 @@ class ObjectDescriptor(typing.Generic[T]):
             return NotImplemented
 
     @property
-    def object_type(self):
+    def object_type(self) -> typing.Type[T]:
         return self._type
 
     @property
     def dependencies(self):
         return self._deps
 
+    @property
+    def instance(self) -> T:
+        return self._instance \
+            if self._instance \
+            else self._resolve()
+
+
+def spec_to_types(spec: inspect.FullArgSpec) -> typing.Dict[str, typing.Type]:
+    args = spec.args.copy()
+    if len(args) > 0 and args[0] == 'self':
+        args = args[1:]
+    return {key: _assert_not_none(key, spec.annotations.get(key)) for key in args}
+
 
 def _assert_not_none(name, obj):
     if obj is None:
-        raise TypeError(name)
+        raise TypeError(name, None)
     else:
         return obj
 
@@ -108,7 +127,8 @@ class _DependencyChecker:
                 raise ValueError(f'Unresolved dependency of {name} => {dep_name}: {dep_type}')
             if dep_type is not self._map[dep_name].object_type:
                 raise ValueError(
-                    f'{descr._name}: {descr._type.__name__} has dependency {dep_name}: {dep_type.__name__}, but {dep_name} of type {self._map[dep_name].object_type.__name__}')
+                    f'{descr._name}: {descr._type.__name__} has dependency {dep_name}: {dep_type.__name__},'
+                    f' but {dep_name} is type {self._map[dep_name].object_type.__name__}')
 
     def check_cycles(self, name: str, stack: typing.List[str]) -> None:
         """
@@ -126,18 +146,20 @@ class PytelContext:
     def __init__(self, d: typing.Dict[str, ObjectDescriptor]):
         self._objects = d
 
+        self._resolve_all()
+
     def get(self, name: str):
-        descr = self._objects[name]
-        if descr._instance is None:
-            descr._instance = self._resolve(name)
-        return descr._instance
+        descriptor = self._objects[name]
+        return descriptor.instance
 
-    def _resolve(self, name: str):
-        descr = self._objects[name]
-        assert descr._instance is None, "called resolve on resolved object"
+    def _resolve_all(self) -> None:
+        def resolver(name, typ):
+            descriptor = self._objects[name]
+            assert issubclass(descriptor.object_type, typ)
+            return descriptor
 
-        resolved_deps = {dep_name: self.get(dep_name) for dep_name in descr.dependencies.keys()}
-        return descr._factory(**resolved_deps)
+        for value in self._objects.values():
+            value.resolve_dependencies(resolver)
 
     def keys(self):
         return self._objects.keys()

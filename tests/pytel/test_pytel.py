@@ -112,9 +112,9 @@ class test_Pytel(TestCase):
             b = TakingString
 
         ctx = ContextCreator(Configurer()).resolve()
-        self.assertEqual(ctx.a, 'A')
+        self.assertEqual('A', ctx.a)
         self.assertIsInstance(ctx.b, TakingString)
-        self.assertEqual(ctx.b.a, 'A')
+        self.assertEqual('A', ctx.b.a)
 
     def test_missing_key(self):
         class Configurer:
@@ -145,3 +145,11 @@ class test_Pytel(TestCase):
         }, {
             'a': B
         }]))
+
+    def test_factory_returned_none(self):
+        class Configurer:
+            def a(self)->str:
+                return None
+
+        ctx= ContextCreator(Configurer()).resolve()
+        self.assertRaises(ValueError, lambda:ctx.a)

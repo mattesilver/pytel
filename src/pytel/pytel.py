@@ -54,7 +54,7 @@ class ContextCreator:
         return self
 
     def _do_configure(self, configurer):
-        m = ContextCreator._to_factory_map(configurer)
+        m = to_factory_map(configurer)
 
         if not self._map.keys().isdisjoint(m.keys()):
             raise KeyError("Duplicate names", list(set(self._map.keys()).intersection(m.keys())))
@@ -66,16 +66,16 @@ class ContextCreator:
         _DependencyChecker(self._map).check()
         return Pytel(context=PytelContext(self._map))
 
-    @staticmethod
-    def _to_factory_map(configurer) -> typing.Mapping[str, callable]:
-        if isinstance(configurer, typing.Mapping):
-            return configurer
-        else:
-            return ContextCreator._services_from_object(configurer)
 
-    @staticmethod
-    def _services_from_object(configurer):
-        return {name: getattr(configurer, name)
-                for name in dir(configurer)
-                if not _is_dunder(name)
-                }
+def to_factory_map(configurer) -> typing.Mapping[str, object]:
+    if isinstance(configurer, typing.Mapping):
+        return configurer
+    else:
+        return services_from_object(configurer)
+
+
+def services_from_object(configurer: object) -> typing.Dict[str, object]:
+    return {name: getattr(configurer, name)
+            for name in dir(configurer)
+            if not _is_dunder(name)
+            }
