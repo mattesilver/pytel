@@ -143,10 +143,28 @@ class _DependencyChecker:
 
 
 class PytelContext:
-    def __init__(self, d: typing.Dict[str, ObjectDescriptor]):
-        self._objects = d
+    def __init__(self, configurers: typing.Union[object, typing.Iterable[object]]):
+        self._objects = {}
 
+        if isinstance(configurers, typing.Mapping):
+            configurers = [configurers]
+        elif not isinstance(configurers, typing.Iterable):
+            configurers = [configurers]
+
+        for configurer in configurers:
+            self._do_configure(configurer)
+
+        _DependencyChecker(self._objects).check()
         self._resolve_all()
+
+    def _do_configure(self, configurer):
+        m = to_factory_map(configurer)
+
+        if not self._objects.keys().isdisjoint(m.keys()):
+            raise KeyError("Duplicate names", list(set(self._objects.keys()).intersection(m.keys())))
+
+        update = {name: ObjectDescriptor.from_(name, fact) for name, fact in m.items()}
+        self._objects.update(update)
 
     def get(self, name: str):
         descriptor = self._objects[name]
@@ -166,3 +184,21 @@ class PytelContext:
 
     def items(self):
         return self._objects.items()
+
+
+def _is_dunder(name):
+    return name.startswith('__') and name.endswith('__')
+
+
+def to_factory_map(configurer) -> typing.Mapping[str, object]:
+    if isinstance(configurer, typing.Mapping):
+        return configurer
+    else:
+        return services_from_object(configurer)
+
+
+def services_from_object(configurer: object) -> typing.Dict[str, object]:
+    return {name: getattr(configurer, name)
+            for name in dir(configurer)
+            if not _is_dunder(name)
+            }
