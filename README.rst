@@ -28,4 +28,4 @@ For when your object graph is too big
     context = Pytel(PytelContext(svc))
     assert context.a.b == context.b
 
-See .. _usage: https://github.com/mattesilver/pytel/blob/master/tests/pytel/test_usage.py for more cases
+See `usage <https://github.com/mattesilver/pytel/blob/master/tests/pytel/test_usage.py>`_ for more cases
