@@ -1,6 +1,10 @@
 language: python
-python: '3.7'
-dist: xenial
+python:
+  - "3.7"
+  - "3.8"
+  - "3.9-dev"
+  - "nightly"  # nightly build
+dist: bionic
 sudo: true
 cache: pip
 before_install:
@@ -19,6 +23,7 @@ deploy:
   on:
     tags: true
     branch: master
+    python: "3.7"
 notifications:
   email:
     on_success: change
