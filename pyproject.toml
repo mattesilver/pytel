@@ -6,7 +6,7 @@ authors = ["Rafal Krupinski"]
 packages = [{include = 'pytel', from = 'src'}]
 license = "Apache-2.0"
 repository = 'https://github.com/mattesilver/pytel'
-keywords = ['injection-of-dependencies']
+keywords = ['injection-of-dependencies','inversion-of-control', 'guice', 'spring']
 readme = 'README.rst'
 
 [tool.poetry.dependencies]
