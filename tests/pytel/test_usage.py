@@ -2,7 +2,7 @@ import contextlib
 from unittest import TestCase
 from unittest.mock import Mock
 
-from pytel import Pytel, PytelContext
+from pytel import Pytel
 from .test_pytel import A, B, C
 
 
@@ -13,7 +13,7 @@ class TestUsage(TestCase):
             'b': B,
             'c': C,
         }
-        ctx = Pytel(PytelContext(svc))
+        ctx = Pytel(svc)
         self.assertIsInstance(ctx.a, A)
         self.assertIsInstance(ctx.b, B)
         self.assertIsInstance(ctx.c, C)
@@ -34,7 +34,7 @@ class TestUsage(TestCase):
             def c(a: A) -> C:
                 return C(a)
 
-        ctx = Pytel(PytelContext(Configurer()))
+        ctx = Pytel(Configurer())
         self.assertIsInstance(ctx.a, A)
         self.assertIsInstance(ctx.b, B)
         self.assertTrue(ctx.b.initialised)
@@ -52,7 +52,7 @@ class TestUsage(TestCase):
             def c(self, a: A) -> C:
                 return C(a)
 
-        ctx = Pytel(PytelContext(Configurer()))
+        ctx = Pytel(Configurer())
         self.assertIsInstance(ctx.a, A)
         self.assertIsInstance(ctx.b, B)
         self.assertTrue(ctx.b.initialised)
@@ -65,7 +65,7 @@ class TestUsage(TestCase):
             b = B
             c = C
 
-        ctx = Pytel(PytelContext(Configurer()))
+        ctx = Pytel(Configurer())
         self.assertIsInstance(ctx.a, A)
         self.assertIsInstance(ctx.b, B)
         self.assertTrue(ctx.b.initialised)
@@ -81,7 +81,7 @@ class TestUsage(TestCase):
             'c': C
         }
 
-        ctx = Pytel(PytelContext([Configurer(), m]))
+        ctx = Pytel([Configurer(), m])
         self.assertIsInstance(ctx.a, A)
         self.assertIsInstance(ctx.b, B)
         self.assertTrue(ctx.b.initialised)
@@ -97,7 +97,7 @@ class TestUsage(TestCase):
             a = 'A'
             b = TakingString
 
-        ctx = Pytel(PytelContext(Configurer()))
+        ctx = Pytel(Configurer())
         self.assertEqual('A', ctx.a)
         self.assertIsInstance(ctx.b, TakingString)
         self.assertEqual('A', ctx.b.a)
@@ -116,8 +116,8 @@ class TestUsage(TestCase):
                 self.exited = True
                 return False
 
-        with PytelContext({'m': D}) as ctx:
-            m = ctx.get('m')
+        with Pytel({'m': D}) as ctx:
+            m = ctx.m
             self.assertTrue(m.initialised)
             self.assertTrue(m.entered)
         self.assertTrue(m.exited)
@@ -131,8 +131,8 @@ class TestUsage(TestCase):
             yield obj
             obj.closed = True
 
-        with PytelContext({'m': factory}) as ctx:
-            m = ctx.get('m')
+        with Pytel({'m': factory}) as ctx:
+            m = ctx.m
             self.assertTrue(m.opened)
 
         self.assertTrue(m.closed)

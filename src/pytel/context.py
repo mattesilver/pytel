@@ -104,6 +104,10 @@ class ObjectDescriptor(typing.Generic[T]):
             if self._instance is not None \
             else self._resolve()
 
+    @property
+    def name(self):
+        return self._name
+
 
 def spec_to_types(spec: inspect.Signature) -> typing.Dict[str, typing.Type]:
     return {
@@ -143,7 +147,7 @@ class _DependencyChecker:
                 raise ValueError(f'Unresolved dependency of {name} => {dep_name}: {dep_type}')
             if not issubclass(self._map[dep_name].object_type, dep_type):
                 raise ValueError(
-                    f'{descr._name}: {descr._type.__name__} has dependency {dep_name}: {dep_type.__name__},'
+                    f'{descr.name}: {descr.object_type.__name__} has dependency {dep_name}: {dep_type.__name__},'
                     f' but {dep_name} is type {self._map[dep_name].object_type.__name__}')
 
     def check_cycles(self, name: str, stack: typing.List[str]) -> None:
@@ -158,61 +162,8 @@ class _DependencyChecker:
             self.check_cycles(dep_name, stack + [name])
 
 
-class PytelContext:
-    def __init__(self, configurers: typing.Union[object, typing.Iterable[object]]):
-        self._objects: typing.Dict[str, ObjectDescriptor] = {}
-        self._exit_stack = contextlib.ExitStack()
-
-        if isinstance(configurers, typing.Mapping):
-            configurers = [configurers]
-        elif not isinstance(configurers, typing.Iterable):
-            configurers = [configurers]
-
-        for configurer in configurers:
-            self._do_configure(configurer)
-
-        _DependencyChecker(self._objects).check()
-        self._resolve_all()
-
-    def _do_configure(self, configurer):
-        m = to_factory_map(configurer)
-
-        if not self._objects.keys().isdisjoint(m.keys()):
-            raise KeyError("Duplicate names", list(set(self._objects.keys()).intersection(m.keys())))
-
-        update = {name: ObjectDescriptor.from_(name, fact) for name, fact in m.items()}
-        self._objects.update(update)
-
-    def get(self, name: str):
-        return self._objects[name].instance
-
-    def _resolve_all(self) -> None:
-        def resolver(name, typ):
-            descriptor = self._objects[name]
-            assert issubclass(descriptor.object_type, typ)
-            return descriptor
-
-        for value in self._objects.values():
-            value.resolve_dependencies(resolver, self._exit_stack)
-
-    def keys(self):
-        return self._objects.keys()
-
-    def items(self):
-        return self._objects.items()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._exit_stack.__exit__(exc_type, exc_val, exc_tb)
-
-    def close(self):
-        return self._exit_stack.close()
-
-
-def _is_dunder(name):
-    return name.startswith('__') and name.endswith('__')
+def _is_under(name: str) -> bool:
+    return name.startswith('_')
 
 
 def to_factory_map(configurer) -> typing.Mapping[str, object]:
@@ -225,5 +176,5 @@ def to_factory_map(configurer) -> typing.Mapping[str, object]:
 def services_from_object(configurer: object) -> typing.Dict[str, object]:
     return {name: getattr(configurer, name)
             for name in dir(configurer)
-            if not _is_dunder(name)
+            if not _is_under(name)
             }

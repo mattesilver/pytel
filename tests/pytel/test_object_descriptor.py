@@ -1,3 +1,4 @@
+import contextlib
 from unittest import TestCase, mock
 
 from pytel.context import ObjectDescriptor
@@ -68,7 +69,12 @@ class TestObjectDescriptor(TestCase):
         descr = ObjectDescriptor.from_object('a', "value")
         self.assertEqual(str(descr), '<ObjectDescriptor> a: str')
 
-    def test_neq(self):
+    def test_eq(self):
+        descr1 = ObjectDescriptor.from_object('a', "str")
+        descr2 = ObjectDescriptor.from_object('a', "str")
+        self.assertTrue(descr1 == descr2)
+
+    def test_eq_not_implemented(self):
         descr = ObjectDescriptor.from_object('a', "str")
         self.assertFalse(descr == 1)
 
@@ -77,5 +83,5 @@ class TestObjectDescriptor(TestCase):
             return None
 
         descr = ObjectDescriptor.from_callable('a', returns_none)
-        descr.resolve_dependencies(None, None)
+        descr.resolve_dependencies(None, contextlib.ExitStack())
         self.assertRaises(ValueError, lambda: descr.instance)
