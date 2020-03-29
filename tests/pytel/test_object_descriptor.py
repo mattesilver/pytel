@@ -77,5 +77,5 @@ class TestObjectDescriptor(TestCase):
             return None
 
         descr = ObjectDescriptor.from_callable('a', returns_none)
-        descr.resolve_dependencies(None)
+        descr.resolve_dependencies(None, None)
         self.assertRaises(ValueError, lambda: descr.instance)

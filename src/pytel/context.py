@@ -1,3 +1,4 @@
+import contextlib
 import inspect
 import logging
 import typing
@@ -6,7 +7,6 @@ log = logging.getLogger(__name__)
 
 T = typing.TypeVar('T')
 FactoryType = typing.Union[T, typing.Callable[..., T]]
-_K_RETURN = 'return'
 
 
 class ObjectDescriptor(typing.Generic[T]):
@@ -21,18 +21,28 @@ class ObjectDescriptor(typing.Generic[T]):
         self._deps = deps
         self._resolved_deps = None
         self._instance: typing.Optional[T] = None
+        self._exit_stack: typing.Optional[contextlib.ExitStack] = None
 
     def _resolve(self) -> T:
         assert self._instance is None, 'Called factory on resolved object'
 
         deps = {name: descr.instance for name, descr in self._resolved_deps.items()}
-        self._instance = self._factory(**deps)
-        if self._instance is None:
-            raise ValueError(self._name, 'Factory returned None')
-        return self._instance
+        instance = self._factory(**deps)
+        if instance is None:
+            raise ValueError(self._name, f"Factory for '{self._name}' returned None")
 
-    def resolve_dependencies(self, resolver: typing.Callable[[str, typing.Type], 'ObjectDescriptor']):
+        if is_context_manager(instance):
+            instance = self._exit_stack.enter_context(instance)
+        self._instance = instance
+        return instance
+
+    def resolve_dependencies(
+            self,
+            resolver: typing.Callable[[str, typing.Type], 'ObjectDescriptor'],
+            exit_stack: contextlib.ExitStack,
+    ):
         self._resolved_deps = {name: resolver(name, typ) for name, typ in self._deps.items()}
+        self._exit_stack = exit_stack
 
     @classmethod
     def from_(cls, name, obj) -> 'ObjectDescriptor':
@@ -46,18 +56,18 @@ class ObjectDescriptor(typing.Generic[T]):
     @classmethod
     def from_callable(cls, name, factory: FactoryType) -> 'ObjectDescriptor':
         assert factory is not None
-        spec = inspect.getfullargspec(factory)
+        signature = inspect.signature(factory)
         if isinstance(factory, type):
             t = factory
         else:
-            if _K_RETURN in spec.annotations:
-                t = spec.annotations[_K_RETURN]
+            if signature.return_annotation is not inspect.Signature.empty:
+                t = signature.return_annotation
                 if t is None:
                     raise TypeError(name, 'Callable type hint is None', factory)
             else:
                 raise TypeError(name, 'No return type annotation')
 
-        deps = spec_to_types(spec)
+        deps = spec_to_types(signature)
 
         log.debug("Dependencies for %s: %s", factory.__qualname__, deps)
         return ObjectDescriptor(factory, name, t, deps)
@@ -95,18 +105,24 @@ class ObjectDescriptor(typing.Generic[T]):
             else self._resolve()
 
 
-def spec_to_types(spec: inspect.FullArgSpec) -> typing.Dict[str, typing.Type]:
-    args = spec.args.copy()
-    if len(args) > 0 and args[0] == 'self':
-        args = args[1:]
-    return {key: _assert_not_none(key, spec.annotations.get(key)) for key in args}
+def spec_to_types(spec: inspect.Signature) -> typing.Dict[str, typing.Type]:
+    return {
+        key: _assert_param_not_empty(key, param.annotation)
+        for key, param in spec.parameters.items()
+        if key != 'self'
+    }
 
 
-def _assert_not_none(name, obj):
-    if obj is None:
-        raise TypeError(name, None)
+def _assert_param_not_empty(name, obj):
+    if obj is inspect.Signature.empty:
+        raise TypeError(name, inspect.Signature.empty)
     else:
         return obj
+
+
+def is_context_manager(obj: object) -> bool:
+    d = dir(obj)
+    return '__enter__' in d and '__exit__' in d
 
 
 class _DependencyChecker:
@@ -144,7 +160,8 @@ class _DependencyChecker:
 
 class PytelContext:
     def __init__(self, configurers: typing.Union[object, typing.Iterable[object]]):
-        self._objects = {}
+        self._objects: typing.Dict[str, ObjectDescriptor] = {}
+        self._exit_stack = contextlib.ExitStack()
 
         if isinstance(configurers, typing.Mapping):
             configurers = [configurers]
@@ -176,13 +193,22 @@ class PytelContext:
             return descriptor
 
         for value in self._objects.values():
-            value.resolve_dependencies(resolver)
+            value.resolve_dependencies(resolver, self._exit_stack)
 
     def keys(self):
         return self._objects.keys()
 
     def items(self):
         return self._objects.items()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def close(self):
+        return self._exit_stack.close()
 
 
 def _is_dunder(name):

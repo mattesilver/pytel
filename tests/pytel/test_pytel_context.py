@@ -1,4 +1,5 @@
 from unittest import TestCase
+from unittest.mock import Mock, patch
 
 from pytel import PytelContext
 from pytel.context import ObjectDescriptor
@@ -98,6 +99,24 @@ class TestPytelContext(TestCase):
     def test_items(self):
         ctx = PytelContext({'a': A})
         self.assertEqual({'a': ObjectDescriptor.from_callable('a', A)}, dict(ctx.items()))
+
+    def test_context_manager(self):
+        import contextlib
+
+        m = Mock()
+
+        @contextlib.contextmanager
+        def factory() -> Mock:
+            yield m
+
+        with PytelContext({'m': factory}) as ctx:
+            self.assertEquals(m, ctx.get('m'))
+
+    def test_close(self):
+        with patch('contextlib.ExitStack') as exit_stack_mock:
+            exit_stack_mock().close = Mock(return_value=False)
+            PytelContext(None).close()
+            exit_stack_mock().close.assert_called_once_with()
 
     def test_object_not_truthy_is_valid(self):
         def factory() -> int:

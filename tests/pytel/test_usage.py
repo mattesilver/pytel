@@ -1,4 +1,6 @@
+import contextlib
 from unittest import TestCase
+from unittest.mock import Mock
 
 from pytel import Pytel, PytelContext
 from .test_pytel import A, B, C
@@ -99,3 +101,38 @@ class TestUsage(TestCase):
         self.assertEqual('A', ctx.a)
         self.assertIsInstance(ctx.b, TakingString)
         self.assertEqual('A', ctx.b.a)
+
+    def test_context_manager(self):
+        class D:
+            def __init__(self):
+                self.initialised = True
+                self.entered = False
+
+            def __enter__(self):
+                self.entered = True
+                return self
+
+            def __exit__(self, *exc_details):
+                self.exited = True
+                return False
+
+        with PytelContext({'m': D}) as ctx:
+            m = ctx.get('m')
+            self.assertTrue(m.initialised)
+            self.assertTrue(m.entered)
+        self.assertTrue(m.exited)
+
+    def test_context_manager_annotation(self):
+        obj = Mock()
+
+        @contextlib.contextmanager
+        def factory() -> Mock:
+            obj.opened = True
+            yield obj
+            obj.closed = True
+
+        with PytelContext({'m': factory}) as ctx:
+            m = ctx.get('m')
+            self.assertTrue(m.opened)
+
+        self.assertTrue(m.closed)
