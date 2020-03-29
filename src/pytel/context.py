@@ -55,7 +55,7 @@ class ObjectDescriptor(typing.Generic[T]):
                 if t is None:
                     raise TypeError(name, 'Callable type hint is None', factory)
             else:
-                raise TypeError(name, 'None type')
+                raise TypeError(name, 'No return type annotation')
 
         deps = spec_to_types(spec)
 
@@ -91,7 +91,7 @@ class ObjectDescriptor(typing.Generic[T]):
     @property
     def instance(self) -> T:
         return self._instance \
-            if self._instance \
+            if self._instance is not None \
             else self._resolve()
 
 
@@ -110,8 +110,8 @@ def _assert_not_none(name, obj):
 
 
 class _DependencyChecker:
-    def __init__(self, map: typing.Dict[str, ObjectDescriptor]):
-        self._map = map
+    def __init__(self, objects: typing.Dict[str, ObjectDescriptor]):
+        self._map = objects
         self._clean = []
 
     def check(self):
@@ -125,7 +125,7 @@ class _DependencyChecker:
         for dep_name, dep_type in descr.dependencies.items():
             if dep_name not in self._map.keys():
                 raise ValueError(f'Unresolved dependency of {name} => {dep_name}: {dep_type}')
-            if dep_type is not self._map[dep_name].object_type:
+            if not issubclass(self._map[dep_name].object_type, dep_type):
                 raise ValueError(
                     f'{descr._name}: {descr._type.__name__} has dependency {dep_name}: {dep_type.__name__},'
                     f' but {dep_name} is type {self._map[dep_name].object_type.__name__}')
@@ -167,8 +167,7 @@ class PytelContext:
         self._objects.update(update)
 
     def get(self, name: str):
-        descriptor = self._objects[name]
-        return descriptor.instance
+        return self._objects[name].instance
 
     def _resolve_all(self) -> None:
         def resolver(name, typ):

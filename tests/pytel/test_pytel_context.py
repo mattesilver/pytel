@@ -98,3 +98,45 @@ class TestPytelContext(TestCase):
     def test_items(self):
         ctx = PytelContext({'a': A})
         self.assertEqual({'a': ObjectDescriptor.from_callable('a', A)}, dict(ctx.items()))
+
+    def test_object_not_truthy_is_valid(self):
+        def factory() -> int:
+            return 0
+
+        self.assertFalse(factory())
+
+        ctx = PytelContext({'a': factory})
+        self.assertEqual(0, ctx.get('a'))
+
+    def test_object_not_truthy_is_valid_dependency(self):
+        def factory() -> int:
+            return 0
+
+        def factory2(a: int) -> B:
+            self.assertEqual(0, a)
+            return B()
+
+        ctx = PytelContext({'a': factory, 'b': factory2})
+        self.assertIsInstance(ctx.get('b'), B)
+
+    def test_factory_returning_subclass(self):
+        class D(A):
+            pass
+
+        def factory() -> A:
+            return D()
+
+        ctx = PytelContext({'a': factory})
+        self.assertIsInstance(ctx.get('a'), D)
+
+    def test_factory_returning_subclass_as_dependency(self):
+        class D(A):
+            pass
+
+        def factory() -> A:
+            return D()
+
+        ctx = PytelContext({'a': factory, 'c': C})
+        c = ctx.get('c')
+        self.assertIsInstance(c, C)
+        self.assertIsInstance(c.a, D)
