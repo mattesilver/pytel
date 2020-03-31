@@ -59,11 +59,25 @@ class TestUsage(TestCase):
         self.assertIsInstance(ctx.c, C)
         self.assertEqual(ctx.c.a, ctx.a)
 
-    def test_create_from_object_fields(self):
+    def test_create_from_class_fields(self):
         class Configurer:
             a = A
             b = B
             c = C
+
+        ctx = Pytel(Configurer())
+        self.assertIsInstance(ctx.a, A)
+        self.assertIsInstance(ctx.b, B)
+        self.assertTrue(ctx.b.initialised)
+        self.assertIsInstance(ctx.c, C)
+        self.assertEqual(ctx.c.a, ctx.a)
+
+    def test_create_from_object_fields(self):
+        class Configurer:
+            def __init__(self):
+                self.a = A()
+                self.b = B
+                self.c = C
 
         ctx = Pytel(Configurer())
         self.assertIsInstance(ctx.a, A)
