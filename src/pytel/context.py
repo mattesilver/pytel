@@ -67,7 +67,7 @@ class ObjectDescriptor(typing.Generic[T]):
             else:
                 raise TypeError(name, 'No return type annotation')
 
-        deps = spec_to_types(signature)
+        deps = spec_to_types(signature, name)
 
         log.debug("Dependencies for %s: %s", factory.__qualname__, deps)
         return ObjectDescriptor(factory, name, t, deps)
@@ -109,17 +109,17 @@ class ObjectDescriptor(typing.Generic[T]):
         return self._name
 
 
-def spec_to_types(spec: inspect.Signature) -> typing.Dict[str, typing.Type]:
+def spec_to_types(spec: inspect.Signature, parent_name: str) -> typing.Dict[str, typing.Type]:
     return {
-        key: _assert_param_not_empty(key, param.annotation)
+        key: _assert_param_not_empty(key, param.annotation, parent_name)
         for key, param in spec.parameters.items()
         if key != 'self'
     }
 
 
-def _assert_param_not_empty(name, obj):
+def _assert_param_not_empty(name, obj, parent_name):
     if obj is inspect.Signature.empty:
-        raise TypeError(name, inspect.Signature.empty)
+        raise TypeError('Undefined type of dependency', parent_name, name, inspect.Signature.empty)
     else:
         return obj
 
