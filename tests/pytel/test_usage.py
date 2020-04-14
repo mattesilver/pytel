@@ -150,3 +150,15 @@ class TestUsage(TestCase):
             self.assertTrue(m.opened)
 
         self.assertTrue(m.closed)
+
+    def test_resolve_from_parent(self):
+        parent = Pytel({'a': A})
+        child = Pytel({}, parent=parent)
+
+        self.assertIsInstance(child.a, A)
+
+    def test_resolve_dependency_from_parent(self):
+        parent = Pytel({'a': A})
+        child = Pytel({'c': C}, parent=parent)
+
+        self.assertIsInstance(child.c.a, A)

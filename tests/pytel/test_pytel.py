@@ -177,6 +177,12 @@ class test_Pytel(TestCase):
 
             log_mock.warning.assert_called_once_with('Empty context')
 
+    def test_init_with_parent_sets_parent(self):
+        parent = Pytel({})
+        child = Pytel({}, parent=parent)
+
+        self.assertEqual(parent, child._parent)
+
     def test_getattr(self):
         a = A()
         ctx = Pytel({'a': a})

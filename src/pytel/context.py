@@ -95,7 +95,7 @@ class ObjectDescriptor(typing.Generic[T]):
         return self._type
 
     @property
-    def dependencies(self):
+    def dependencies(self) -> typing.Dict[str, typing.Type]:
         return self._deps
 
     @property
@@ -127,39 +127,6 @@ def _assert_param_not_empty(name, obj, parent_name):
 def is_context_manager(obj: object) -> bool:
     d = dir(obj)
     return '__enter__' in d and '__exit__' in d
-
-
-class _DependencyChecker:
-    def __init__(self, objects: typing.Dict[str, ObjectDescriptor]):
-        self._map = objects
-        self._clean = []
-
-    def check(self):
-        for name, descr in self._map.items():
-            self.check_defs(name, descr)
-
-        for name in self._map.keys():
-            self.check_cycles(name, [])
-
-    def check_defs(self, name: str, descr: ObjectDescriptor):
-        for dep_name, dep_type in descr.dependencies.items():
-            if dep_name not in self._map.keys():
-                raise ValueError(f'Unresolved dependency of {name} => {dep_name}: {dep_type}')
-            if not issubclass(self._map[dep_name].object_type, dep_type):
-                raise ValueError(
-                    f'{descr.name}: {descr.object_type.__name__} has dependency {dep_name}: {dep_type.__name__},'
-                    f' but {dep_name} is type {self._map[dep_name].object_type.__name__}')
-
-    def check_cycles(self, name: str, stack: typing.List[str]) -> None:
-        """
-        :param name:
-        :param stack: reverse dependencies excluding the current one
-        """
-        if name in stack:
-            raise ValueError(f'{name} depends on itself. Dependency path: {stack + [name]}')
-
-        for dep_name in self._map[name].dependencies:
-            self.check_cycles(dep_name, stack + [name])
 
 
 def _is_under(name: str) -> bool:
