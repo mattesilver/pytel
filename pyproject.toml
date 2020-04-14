@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pytel-inject"
-version = "0.5"
+version = "0.5.1"
 description = "Injection of dependencies for python 3"
 authors = ["Rafal Krupinski"]
 packages = [{include = 'pytel', from = 'src'}]
