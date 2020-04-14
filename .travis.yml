@@ -1,11 +1,12 @@
 language: python
 python:
-  - "3.7"
-  - "3.8"
-  - "3.9-dev"
-  - "nightly"  # nightly build
+- "3.6"
+- "3.7"
+- "3.8"
+- "3.9-dev"
+- "nightly"  # nightly build
+os: linux
 dist: bionic
-sudo: true
 cache: pip
 before_install:
 - pip install poetry
